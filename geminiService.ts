@@ -1,12 +1,26 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { ShoppingItem, Status } from "./types";
+import { ShoppingItem } from "./types";
 
-// Always use the API key directly from process.env.API_KEY as per guidelines
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Safety check for the API key to prevent "An API key must be set" error
+const API_KEY = process.env.API_KEY;
+export const isAiEnabled = typeof API_KEY === 'string' && API_KEY.length > 10;
+
+// Function to get the AI instance lazily to avoid crash at module load
+const getAi = () => {
+  if (!isAiEnabled) return null;
+  return new GoogleGenAI({ apiKey: API_KEY! });
+};
 
 export const parseShoppingInput = async (input: string): Promise<Partial<ShoppingItem>[]> => {
+  if (!isAiEnabled) {
+    console.warn("Gemini AI is not configured. Please set process.env.API_KEY.");
+    return [];
+  }
+
   try {
+    const ai = getAi();
+    if (!ai) return [];
+
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Procesa esta lista de la compra: "${input}". 

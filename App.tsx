@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { ShoppingItem, Status, STORES } from './types';
 import Onboarding from './components/Onboarding';
@@ -7,6 +6,7 @@ import StoreFilter from './components/StoreFilter';
 import ShoppingList from './components/ShoppingList';
 import InputBar from './components/InputBar';
 import ShoppingMode from './components/ShoppingMode';
+import { isAiEnabled } from './geminiService';
 
 const App: React.FC = () => {
   const [familyCode, setFamilyCode] = useState<string | null>(localStorage.getItem('familyCode'));
@@ -124,15 +124,12 @@ const App: React.FC = () => {
     setIsShoppingMode(false);
   };
 
-  // SMART FILTERING LOGIC
   const filterItems = (status: Status) => {
     return items.filter(item => {
       if (item.status !== status) return false;
       if (activeStore === 'Todos') return true;
-      // Show items specifically for this store OR general items (Cualquiera/Otros)
       return item.store === activeStore || item.store === 'Cualquiera' || item.store === 'Otros';
     }).sort((a, b) => {
-      // Prioritize items from the ACTIVE STORE to the top
       if (activeStore !== 'Todos') {
         if (a.store === activeStore && b.store !== activeStore) return -1;
         if (a.store !== activeStore && b.store === activeStore) return 1;
@@ -167,6 +164,14 @@ const App: React.FC = () => {
               setFamilyCode(null);
             }} 
           />
+
+          {!isAiEnabled && (
+            <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
+              <p className="text-[10px] text-amber-500 font-bold uppercase tracking-tight leading-tight">
+                ⚠️ Falta la API Key de Gemini. El reconocimiento de voz y categorización automática están desactivados.
+              </p>
+            </div>
+          )}
           
           <StoreFilter 
             activeStore={activeStore} 
@@ -179,7 +184,7 @@ const App: React.FC = () => {
                 <h2 className="text-xs font-black tracking-widest text-gray-500 uppercase">Pendientes</h2>
                 <button 
                   onClick={() => setIsShoppingMode(true)}
-                  className="text-[10px] font-bold text-[#f05a28] border border-[#f05a28]/30 px-2 py-1 rounded-full uppercase tracking-tighter"
+                  className="text-[10px] font-bold text-brand border border-brand/30 px-2 py-1 rounded-full uppercase tracking-tighter"
                 >
                   Modo Compra
                 </button>
