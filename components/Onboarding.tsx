@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 
 interface OnboardingProps {
@@ -24,40 +23,50 @@ const Onboarding: React.FC<OnboardingProps> = ({ onJoin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col items-center justify-center px-8 text-center">
-      <div className="mb-12">
-        <h1 className="text-5xl font-black tracking-tighter text-white mb-2">
-          diloy<span className="text-[#f05a28]">listo</span>
-        </h1>
-        <p className="text-gray-500 font-bold uppercase tracking-widest text-[10px]">Smart Family Shopping List</p>
-      </div>
-
-      <div className="w-full max-w-xs space-y-6">
-        <div className="space-y-2">
-          <input 
-            type="text" 
-            placeholder="Introduce código (opcional)"
-            maxLength={6}
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            className="w-full glass bg-transparent border-gray-800 p-4 rounded-2xl text-center text-xl font-black tracking-widest text-[#f05a28] focus:border-[#f05a28] transition-colors uppercase outline-none"
-          />
-          <p className="text-[10px] text-gray-600 font-medium">Usa un código de 6 letras para compartir lista</p>
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center px-6 py-12">
+      {/* Demo Section Centrada */}
+      <div className="w-full max-w-sm flex flex-col items-center text-center space-y-8 animate-in fade-in zoom-in duration-700">
+        
+        {/* Títol i Subtítol */}
+        <div className="space-y-4">
+          <div className="inline-block px-4 py-1.5 rounded-full bg-brand/10 border border-brand/20 mb-4">
+            <span className="text-brand text-[10px] font-black uppercase tracking-widest">v2.0 Beta</span>
+          </div>
+          <h1 className="text-6xl font-black tracking-tighter text-white">
+            diloy<span className="text-brand">listo</span>
+          </h1>
+          <p className="text-slate-400 text-sm font-medium leading-relaxed max-w-[280px] mx-auto">
+            La teva llista de la compra intel·ligent, ara amb <span className="text-white font-bold">Tailwind nativament</span>.
+          </p>
         </div>
 
-        <button 
-          onClick={handleStart}
-          className="w-full orange-gradient p-5 rounded-2xl text-white font-black tracking-widest uppercase text-sm shadow-2xl orange-glow hover:scale-[1.02] transition-transform"
-        >
-          {code.length === 6 ? 'Unirse a Familia' : 'Crear Nueva Lista'}
-        </button>
+        {/* Formulari i Botó (Classes Tailwind) */}
+        <div className="w-full space-y-4 pt-4">
+          <div className="relative group">
+            <input 
+              type="text" 
+              placeholder="Codi familiar (opcional)"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              className="w-full bg-slate-900 border border-slate-800 p-5 rounded-3xl text-center text-xl font-black tracking-widest text-brand focus:ring-2 focus:ring-brand/50 focus:border-brand transition-all outline-none placeholder:text-slate-700 placeholder:tracking-normal placeholder:font-bold"
+            />
+          </div>
 
-        <div className="pt-12 text-[10px] text-gray-700 font-medium space-y-4">
-          <p>Powered by Google Gemini 3 Flash</p>
-          <div className="flex justify-center gap-4 opacity-50">
-            <span>MODO OSCURO</span>
-            <span>CONTROL POR VOZ</span>
-            <span>COLABORATIVO</span>
+          <button 
+            onClick={handleStart}
+            className="w-full orange-gradient p-5 rounded-3xl text-white font-black tracking-widest uppercase text-sm shadow-2xl orange-glow hover:scale-[1.03] active:scale-95 transition-all duration-300"
+          >
+            {code.length === 6 ? 'Unir-se a la Llista' : 'Començar Ara'}
+          </button>
+        </div>
+
+        {/* Footer Info */}
+        <div className="pt-8 space-y-2 opacity-50">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Powered by Gemini + Vite</p>
+          <div className="flex justify-center gap-3 text-[9px] font-black text-slate-600 uppercase tracking-tighter">
+            <span className="bg-slate-900 px-2 py-0.5 rounded border border-slate-800">No CDN</span>
+            <span className="bg-slate-900 px-2 py-0.5 rounded border border-slate-800">Production Ready</span>
           </div>
         </div>
       </div>

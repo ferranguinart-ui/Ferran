@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply antialiased selection:bg-brand selection:text-white;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-neutral-900/70 backdrop-blur-xl border border-white/10;
+  }
+  
+  .orange-gradient {
+    @apply bg-gradient-to-br from-[#f05a28] to-[#ff8c00];
+  }
+  
+  .orange-glow {
+    @apply shadow-[0_0_25px_rgba(240,90,40,0.3)];
+  }
+
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    @apply hidden;
+  }
+}
+
+@keyframes wave {
+    0%, 100% { transform: scaleY(1); }
+    50% { transform: scaleY(2.5); }
+}
+
+.wave-bar {
+    animation: wave 1s infinite ease-in-out;
+}
