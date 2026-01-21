@@ -1,0 +1,7 @@
+{
+  "name": "diloylisto",
+  "description": "Lista de la compra colaborativa e inteligente con IA. Añade productos por voz o texto y deja que Gemini los organice por tienda y categoría.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
