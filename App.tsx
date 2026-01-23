@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ShoppingItem, Status, STORES } from './types';
+import { ShoppingItem, Status } from './types';
 import Onboarding from './components/Onboarding';
 import Header from './components/Header';
 import StoreFilter from './components/StoreFilter';
@@ -16,31 +16,31 @@ const App: React.FC = () => {
   const [isShoppingMode, setIsShoppingMode] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   
-  // Usamos una referencia para comparar si los datos externos son diferentes a los locales
-  // y evitar bucles de actualización innecesarios.
+  // Ref para evitar ciclos infinitos y proteger la escritura
   const lastFetchedDataRef = useRef<string>('');
+  const isWritingRef = useRef<boolean>(false);
 
   const SYNC_URL = `https://kvdb.io/AnV9B1Uq8G9uS3mH8p4W5A/${familyCode}`;
 
   const fetchItems = useCallback(async (showLoader = true) => {
-    if (!familyCode) return;
-    if (showLoader) setIsSyncing(true);
+    if (!familyCode || isWritingRef.current) return;
     
+    if (showLoader) setIsSyncing(true);
     try {
       const response = await fetch(SYNC_URL);
       if (response.ok) {
         const data = await response.json();
         const dataString = JSON.stringify(data);
         
-        // Solo actualizamos el estado si los datos han cambiado realmente en el servidor
-        if (dataString !== lastFetchedDataRef.current) {
+        // Solo actualizamos si los datos externos son diferentes y no estamos escribiendo
+        if (dataString !== lastFetchedDataRef.current && !isWritingRef.current) {
           setItems(data);
           lastFetchedDataRef.current = dataString;
           localStorage.setItem(`items_${familyCode}`, dataString);
         }
       }
     } catch (error) {
-      console.warn("Error de sincronización o modo offline.");
+      console.warn("Sync error (polling)");
     } finally {
       if (showLoader) setIsSyncing(false);
     }
@@ -49,43 +49,41 @@ const App: React.FC = () => {
   const saveItems = async (currentItems: ShoppingItem[]) => {
     if (!familyCode) return;
     
-    // Actualizamos localmente primero para feedback instantáneo
-    const dataString = JSON.stringify(currentItems);
-    setItems(currentItems);
-    lastFetchedDataRef.current = dataString;
-    localStorage.setItem(`items_${familyCode}`, dataString);
-    
+    isWritingRef.current = true; // Bloqueamos lecturas entrantes
     setIsSyncing(true);
+    
+    const dataString = JSON.stringify(currentItems);
+    
     try {
+      // Guardado local inmediato
+      setItems(currentItems);
+      localStorage.setItem(`items_${familyCode}`, dataString);
+      lastFetchedDataRef.current = dataString;
+
       await fetch(SYNC_URL, {
         method: 'POST',
         body: dataString,
       });
     } catch (error) {
-      console.error("Error al guardar en la nube:", error);
+      console.error("Error saving to cloud:", error);
     } finally {
-      setIsSyncing(false);
+      // Pequeña pausa para asegurar que el servidor KVDB se actualice antes de permitir la siguiente lectura
+      setTimeout(() => {
+        isWritingRef.current = false;
+        setIsSyncing(false);
+      }, 1000);
     }
   };
 
-  // Efecto para la carga inicial y el sistema de "Auto-Refresco" (Polling)
   useEffect(() => {
     if (familyCode) {
-      // Cargar caché local para velocidad inmediata
       const saved = localStorage.getItem(`items_${familyCode}`);
       if (saved) {
         setItems(JSON.parse(saved));
         lastFetchedDataRef.current = saved;
       }
-      
-      // Primera carga desde el servidor
       fetchItems();
-
-      // Configurar el temporizador para sincronización automática cada 5 segundos
-      const interval = setInterval(() => {
-        fetchItems(false); // Refresco silencioso (sin activar el spinner de carga)
-      }, 5000);
-
+      const interval = setInterval(() => fetchItems(false), 5000);
       return () => clearInterval(interval);
     }
   }, [familyCode, fetchItems]);
@@ -100,67 +98,80 @@ const App: React.FC = () => {
       status: (item.status as Status) || 'ACTIVE',
       createdAt: Date.now()
     }));
-    const updated = [...formatted, ...items];
-    saveItems(updated);
+
+    // Usamos el estado más reciente para la fusión
+    setItems(prevItems => {
+      const updated = [...formatted, ...prevItems];
+      saveItems(updated);
+      return updated;
+    });
   };
 
   const toggleStatus = (id: string) => {
     if (window.navigator.vibrate) window.navigator.vibrate(10);
-    const updated = items.map(item => {
-      if (item.id === id) {
-        const nextStatus: Status = item.status === 'COMPLETED' ? 'ACTIVE' : 'COMPLETED';
-        return { ...item, status: nextStatus };
-      }
-      return item;
+    setItems(prevItems => {
+      const updated = prevItems.map(item => 
+        item.id === id ? { ...item, status: (item.status === 'COMPLETED' ? 'ACTIVE' : 'COMPLETED') as Status } : item
+      );
+      saveItems(updated);
+      return updated;
     });
-    saveItems(updated);
   };
 
   const deleteItem = (id: string) => {
-    const updated = items.filter(item => item.id !== id);
-    saveItems(updated);
+    setItems(prevItems => {
+      const updated = prevItems.filter(item => item.id !== id);
+      saveItems(updated);
+      return updated;
+    });
   };
 
   const updateItemStore = (id: string, newStore: string) => {
-    const updated = items.map(item => 
-      item.id === id ? { ...item, store: newStore } : item
-    );
-    saveItems(updated);
+    setItems(prevItems => {
+      const updated = prevItems.map(item => 
+        item.id === id ? { ...item, store: newStore } : item
+      );
+      saveItems(updated);
+      return updated;
+    });
   };
 
   const moveToDraft = (id: string) => {
-    const updated: ShoppingItem[] = items.map(item => 
-      item.id === id ? { ...item, status: 'DRAFT' as Status } : item
-    );
-    saveItems(updated);
+    setItems(prevItems => {
+      const updated = prevItems.map(item => 
+        item.id === id ? { ...item, status: 'DRAFT' as Status } : item
+      );
+      saveItems(updated);
+      return updated;
+    });
   };
 
   const moveToActive = (id: string) => {
-    const updated: ShoppingItem[] = items.map(item => 
-      item.id === id ? { ...item, status: 'ACTIVE' as Status } : item
-    );
-    saveItems(updated);
+    setItems(prevItems => {
+      const updated = prevItems.map(item => 
+        item.id === id ? { ...item, status: 'ACTIVE' as Status } : item
+      );
+      saveItems(updated);
+      return updated;
+    });
   };
 
   const clearCompletedItems = () => {
     if (window.navigator.vibrate) window.navigator.vibrate([30, 50, 30]);
-    const updated = items.filter(item => item.status !== 'COMPLETED');
-    saveItems(updated);
+    setItems(prevItems => {
+      const updated = prevItems.filter(item => item.status !== 'COMPLETED');
+      saveItems(updated);
+      return updated;
+    });
     setIsShoppingMode(false);
   };
 
-  const filterItems = (status: Status) => {
+  const filterItemsByStatus = (status: Status) => {
     return items.filter(item => {
       if (item.status !== status) return false;
       if (activeStore === 'Todos') return true;
       return item.store === activeStore || item.store === 'Cualquiera' || item.store === 'Otros';
-    }).sort((a, b) => {
-      if (activeStore !== 'Todos') {
-        if (a.store === activeStore && b.store !== activeStore) return -1;
-        if (a.store !== activeStore && b.store === activeStore) return 1;
-      }
-      return b.createdAt - a.createdAt;
-    });
+    }).sort((a, b) => b.createdAt - a.createdAt);
   };
 
   if (!familyCode) {
@@ -171,7 +182,7 @@ const App: React.FC = () => {
     <div className="min-h-screen pb-32 flex flex-col max-w-md mx-auto relative px-4">
       {isShoppingMode ? (
         <ShoppingMode 
-          items={filterItems('ACTIVE').concat(filterItems('COMPLETED'))} 
+          items={filterItemsByStatus('ACTIVE').concat(filterItemsByStatus('COMPLETED'))} 
           onClose={() => setIsShoppingMode(false)}
           onToggleStatus={toggleStatus}
           onAddItems={addItem}
@@ -185,15 +196,17 @@ const App: React.FC = () => {
             isSyncing={isSyncing}
             onRefresh={() => fetchItems(true)}
             onExit={() => {
-              localStorage.removeItem('familyCode');
-              setFamilyCode(null);
+              if (confirm("¿Seguro que quieres salir de esta lista familiar?")) {
+                localStorage.removeItem('familyCode');
+                setFamilyCode(null);
+              }
             }} 
           />
 
           {!isAiEnabled && (
             <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
-              <p className="text-[10px] text-amber-500 font-bold uppercase tracking-tight leading-tight">
-                ⚠️ Falta la API Key de Gemini. El reconocimiento de voz y categorización automática están desactivados.
+              <p className="text-[10px] text-amber-500 font-bold uppercase tracking-tight">
+                ⚠️ IA no configurada. Reconocimiento de voz desactivado.
               </p>
             </div>
           )}
@@ -206,40 +219,40 @@ const App: React.FC = () => {
           <div className="flex-1 space-y-8 mt-4 overflow-y-auto hide-scrollbar">
             <section>
               <div className="flex justify-between items-end mb-4">
-                <h2 className="text-xs font-black tracking-widest text-gray-500 uppercase">Pendientes</h2>
+                <h2 className="text-xs font-black tracking-widest text-gray-500 uppercase">Pendents</h2>
                 <button 
                   onClick={() => setIsShoppingMode(true)}
-                  className="text-[10px] font-bold text-brand border border-brand/30 px-2 py-1 rounded-full uppercase tracking-tighter"
+                  className="text-[10px] font-bold text-brand border border-brand/30 px-3 py-1.5 rounded-full uppercase tracking-tight active:bg-brand active:text-white transition-colors"
                 >
                   Modo Compra
                 </button>
               </div>
               <ShoppingList 
-                items={filterItems('ACTIVE')} 
+                items={filterItemsByStatus('ACTIVE')} 
                 onToggle={toggleStatus}
                 onDelete={deleteItem}
                 onMove={moveToDraft}
                 onUpdateStore={updateItemStore}
-                moveLabel="Para luego"
+                moveLabel="Per després"
                 activeStore={activeStore}
               />
             </section>
 
             <section>
-              <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Para Luego</h2>
+              <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Per Després</h2>
               <ShoppingList 
                 items={items.filter(i => i.status === 'DRAFT')} 
                 onToggle={toggleStatus}
                 onDelete={deleteItem}
                 onMove={moveToActive}
-                moveLabel="Añadir ahora"
+                moveLabel="Afegir ara"
               />
             </section>
 
             <section className="opacity-40">
-              <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Comprado</h2>
+              <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Comprat</h2>
               <ShoppingList 
-                items={filterItems('COMPLETED')} 
+                items={filterItemsByStatus('COMPLETED')} 
                 onToggle={toggleStatus}
                 onDelete={deleteItem}
                 activeStore={activeStore}
