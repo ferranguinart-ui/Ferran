@@ -16,47 +16,60 @@ const App: React.FC = () => {
   const [isShoppingMode, setIsShoppingMode] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   
-  // Ref para evitar ciclos infinitos y proteger la escritura
+  // Refs para control de flujo y evitar colisiones
   const lastFetchedDataRef = useRef<string>('');
-  const isWritingRef = useRef<boolean>(false);
+  const cooldownRef = useRef<number>(0);
 
   const SYNC_URL = `https://kvdb.io/AnV9B1Uq8G9uS3mH8p4W5A/${familyCode}`;
 
-  const fetchItems = useCallback(async (showLoader = true) => {
-    if (!familyCode || isWritingRef.current) return;
+  const fetchItems = useCallback(async (showLoader = false) => {
+    // Si estamos en "cooldown" (acabamos de guardar), no leemos de la nube para evitar datos viejos
+    if (!familyCode || Date.now() < cooldownRef.current) return;
     
     if (showLoader) setIsSyncing(true);
     try {
       const response = await fetch(SYNC_URL);
       if (response.ok) {
-        const data = await response.json();
-        const dataString = JSON.stringify(data);
+        const cloudData: ShoppingItem[] = await response.json();
+        const dataString = JSON.stringify(cloudData);
         
-        // Solo actualizamos si los datos externos son diferentes y no estamos escribiendo
-        if (dataString !== lastFetchedDataRef.current && !isWritingRef.current) {
-          setItems(data);
-          lastFetchedDataRef.current = dataString;
-          localStorage.setItem(`items_${familyCode}`, dataString);
+        if (dataString !== lastFetchedDataRef.current) {
+          // Fusión inteligente: Mantenemos items locales que quizá no se han subido aún
+          setItems(prevItems => {
+            const mergedMap = new Map();
+            // 1. Metemos lo que hay en la nube
+            cloudData.forEach(item => mergedMap.set(item.id, item));
+            // 2. Metemos lo local que sea muy reciente (últimos 10 seg) por si acaso no llegó a la nube
+            prevItems.forEach(item => {
+              if (!mergedMap.has(item.id) && (Date.now() - item.createdAt < 10000)) {
+                mergedMap.set(item.id, item);
+              }
+            });
+            const merged = Array.from(mergedMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+            lastFetchedDataRef.current = JSON.stringify(merged);
+            localStorage.setItem(`items_${familyCode}`, lastFetchedDataRef.current);
+            return merged;
+          });
         }
       }
     } catch (error) {
-      console.warn("Sync error (polling)");
+      console.warn("Cloud sync pulse failed (Offline mode)");
     } finally {
       if (showLoader) setIsSyncing(false);
     }
   }, [familyCode, SYNC_URL]);
 
-  const saveItems = async (currentItems: ShoppingItem[]) => {
+  const saveToCloud = async (currentItems: ShoppingItem[]) => {
     if (!familyCode) return;
     
-    isWritingRef.current = true; // Bloqueamos lecturas entrantes
+    // Activamos cooldown: No leeremos de la nube en los próximos 3 segundos
+    cooldownRef.current = Date.now() + 3000;
     setIsSyncing(true);
     
     const dataString = JSON.stringify(currentItems);
     
     try {
-      // Guardado local inmediato
-      setItems(currentItems);
+      // Guardado local inmediato para UX fluida
       localStorage.setItem(`items_${familyCode}`, dataString);
       lastFetchedDataRef.current = dataString;
 
@@ -67,23 +80,24 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Error saving to cloud:", error);
     } finally {
-      // Pequeña pausa para asegurar que el servidor KVDB se actualice antes de permitir la siguiente lectura
       setTimeout(() => {
-        isWritingRef.current = false;
         setIsSyncing(false);
-      }, 1000);
+      }, 500);
     }
   };
 
+  // Efecto de Polling (Consulta constante cada 3 segundos)
   useEffect(() => {
     if (familyCode) {
+      // Carga inicial desde caché
       const saved = localStorage.getItem(`items_${familyCode}`);
       if (saved) {
         setItems(JSON.parse(saved));
         lastFetchedDataRef.current = saved;
       }
-      fetchItems();
-      const interval = setInterval(() => fetchItems(false), 5000);
+      
+      fetchItems(true);
+      const interval = setInterval(() => fetchItems(false), 3000);
       return () => clearInterval(interval);
     }
   }, [familyCode, fetchItems]);
@@ -99,10 +113,9 @@ const App: React.FC = () => {
       createdAt: Date.now()
     }));
 
-    // Usamos el estado más reciente para la fusión
     setItems(prevItems => {
       const updated = [...formatted, ...prevItems];
-      saveItems(updated);
+      saveToCloud(updated);
       return updated;
     });
   };
@@ -113,7 +126,7 @@ const App: React.FC = () => {
       const updated = prevItems.map(item => 
         item.id === id ? { ...item, status: (item.status === 'COMPLETED' ? 'ACTIVE' : 'COMPLETED') as Status } : item
       );
-      saveItems(updated);
+      saveToCloud(updated);
       return updated;
     });
   };
@@ -121,7 +134,7 @@ const App: React.FC = () => {
   const deleteItem = (id: string) => {
     setItems(prevItems => {
       const updated = prevItems.filter(item => item.id !== id);
-      saveItems(updated);
+      saveToCloud(updated);
       return updated;
     });
   };
@@ -131,7 +144,7 @@ const App: React.FC = () => {
       const updated = prevItems.map(item => 
         item.id === id ? { ...item, store: newStore } : item
       );
-      saveItems(updated);
+      saveToCloud(updated);
       return updated;
     });
   };
@@ -141,7 +154,7 @@ const App: React.FC = () => {
       const updated = prevItems.map(item => 
         item.id === id ? { ...item, status: 'DRAFT' as Status } : item
       );
-      saveItems(updated);
+      saveToCloud(updated);
       return updated;
     });
   };
@@ -151,7 +164,7 @@ const App: React.FC = () => {
       const updated = prevItems.map(item => 
         item.id === id ? { ...item, status: 'ACTIVE' as Status } : item
       );
-      saveItems(updated);
+      saveToCloud(updated);
       return updated;
     });
   };
@@ -160,7 +173,7 @@ const App: React.FC = () => {
     if (window.navigator.vibrate) window.navigator.vibrate([30, 50, 30]);
     setItems(prevItems => {
       const updated = prevItems.filter(item => item.status !== 'COMPLETED');
-      saveItems(updated);
+      saveToCloud(updated);
       return updated;
     });
     setIsShoppingMode(false);
@@ -170,7 +183,7 @@ const App: React.FC = () => {
     return items.filter(item => {
       if (item.status !== status) return false;
       if (activeStore === 'Todos') return true;
-      return item.store === activeStore || item.store === 'Cualquiera' || item.store === 'Otros';
+      return item.store === activeStore || item.store === 'Cualquiera';
     }).sort((a, b) => b.createdAt - a.createdAt);
   };
 
@@ -196,20 +209,12 @@ const App: React.FC = () => {
             isSyncing={isSyncing}
             onRefresh={() => fetchItems(true)}
             onExit={() => {
-              if (confirm("¿Seguro que quieres salir de esta lista familiar?")) {
+              if (confirm("¿Seguro que quieres salir de esta lista?")) {
                 localStorage.removeItem('familyCode');
                 setFamilyCode(null);
               }
             }} 
           />
-
-          {!isAiEnabled && (
-            <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
-              <p className="text-[10px] text-amber-500 font-bold uppercase tracking-tight">
-                ⚠️ IA no configurada. Reconocimiento de voz desactivado.
-              </p>
-            </div>
-          )}
           
           <StoreFilter 
             activeStore={activeStore} 
@@ -222,7 +227,7 @@ const App: React.FC = () => {
                 <h2 className="text-xs font-black tracking-widest text-gray-500 uppercase">Pendents</h2>
                 <button 
                   onClick={() => setIsShoppingMode(true)}
-                  className="text-[10px] font-bold text-brand border border-brand/30 px-3 py-1.5 rounded-full uppercase tracking-tight active:bg-brand active:text-white transition-colors"
+                  className="text-[10px] font-bold text-brand border border-brand/30 px-3 py-1.5 rounded-full uppercase"
                 >
                   Modo Compra
                 </button>
@@ -238,26 +243,30 @@ const App: React.FC = () => {
               />
             </section>
 
-            <section>
-              <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Per Després</h2>
-              <ShoppingList 
-                items={items.filter(i => i.status === 'DRAFT')} 
-                onToggle={toggleStatus}
-                onDelete={deleteItem}
-                onMove={moveToActive}
-                moveLabel="Afegir ara"
-              />
-            </section>
+            {items.some(i => i.status === 'DRAFT') && (
+              <section>
+                <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Per Després</h2>
+                <ShoppingList 
+                  items={items.filter(i => i.status === 'DRAFT')} 
+                  onToggle={toggleStatus}
+                  onDelete={deleteItem}
+                  onMove={moveToActive}
+                  moveLabel="Afegir ara"
+                />
+              </section>
+            )}
 
-            <section className="opacity-40">
-              <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Comprat</h2>
-              <ShoppingList 
-                items={filterItemsByStatus('COMPLETED')} 
-                onToggle={toggleStatus}
-                onDelete={deleteItem}
-                activeStore={activeStore}
-              />
-            </section>
+            {filterItemsByStatus('COMPLETED').length > 0 && (
+              <section className="opacity-40">
+                <h2 className="text-xs font-black tracking-widest text-gray-500 mb-4 uppercase">Comprat</h2>
+                <ShoppingList 
+                  items={filterItemsByStatus('COMPLETED')} 
+                  onToggle={toggleStatus}
+                  onDelete={deleteItem}
+                  activeStore={activeStore}
+                />
+              </section>
+            )}
           </div>
 
           <InputBar onAddItems={addItem} />
