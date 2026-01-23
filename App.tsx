@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ShoppingItem, Status, STORES } from './types';
 import Onboarding from './components/Onboarding';
 import Header from './components/Header';
@@ -14,56 +15,80 @@ const App: React.FC = () => {
   const [activeStore, setActiveStore] = useState('Todos');
   const [isShoppingMode, setIsShoppingMode] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  
+  // Usamos una referencia para comparar si los datos externos son diferentes a los locales
+  // y evitar bucles de actualización innecesarios.
+  const lastFetchedDataRef = useRef<string>('');
 
   const SYNC_URL = `https://kvdb.io/AnV9B1Uq8G9uS3mH8p4W5A/${familyCode}`;
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (showLoader = true) => {
     if (!familyCode) return;
-    setIsSyncing(true);
+    if (showLoader) setIsSyncing(true);
+    
     try {
       const response = await fetch(SYNC_URL);
       if (response.ok) {
         const data = await response.json();
-        if (Array.isArray(data)) {
+        const dataString = JSON.stringify(data);
+        
+        // Solo actualizamos el estado si los datos han cambiado realmente en el servidor
+        if (dataString !== lastFetchedDataRef.current) {
           setItems(data);
-          localStorage.setItem(`items_${familyCode}`, JSON.stringify(data));
+          lastFetchedDataRef.current = dataString;
+          localStorage.setItem(`items_${familyCode}`, dataString);
         }
       }
     } catch (error) {
-      console.warn("Offline mode: using local cache.");
+      console.warn("Error de sincronización o modo offline.");
     } finally {
-      setIsSyncing(false);
+      if (showLoader) setIsSyncing(false);
     }
   }, [familyCode, SYNC_URL]);
 
   const saveItems = async (currentItems: ShoppingItem[]) => {
     if (!familyCode) return;
+    
+    // Actualizamos localmente primero para feedback instantáneo
+    const dataString = JSON.stringify(currentItems);
+    setItems(currentItems);
+    lastFetchedDataRef.current = dataString;
+    localStorage.setItem(`items_${familyCode}`, dataString);
+    
     setIsSyncing(true);
     try {
-      localStorage.setItem(`items_${familyCode}`, JSON.stringify(currentItems));
       await fetch(SYNC_URL, {
         method: 'POST',
-        body: JSON.stringify(currentItems),
+        body: dataString,
       });
     } catch (error) {
-      console.error("Sync error:", error);
+      console.error("Error al guardar en la nube:", error);
     } finally {
       setIsSyncing(false);
     }
   };
 
+  // Efecto para la carga inicial y el sistema de "Auto-Refresco" (Polling)
   useEffect(() => {
     if (familyCode) {
+      // Cargar caché local para velocidad inmediata
       const saved = localStorage.getItem(`items_${familyCode}`);
-      if (saved) setItems(JSON.parse(saved));
+      if (saved) {
+        setItems(JSON.parse(saved));
+        lastFetchedDataRef.current = saved;
+      }
+      
+      // Primera carga desde el servidor
       fetchItems();
+
+      // Configurar el temporizador para sincronización automática cada 5 segundos
+      const interval = setInterval(() => {
+        fetchItems(false); // Refresco silencioso (sin activar el spinner de carga)
+      }, 5000);
+
+      return () => clearInterval(interval);
     }
   }, [familyCode, fetchItems]);
-
-  const updateItems = (newItems: ShoppingItem[]) => {
-    setItems(newItems);
-    saveItems(newItems);
-  };
 
   const addItem = (newItems: Partial<ShoppingItem>[]) => {
     const formatted: ShoppingItem[] = newItems.map(item => ({
@@ -76,7 +101,7 @@ const App: React.FC = () => {
       createdAt: Date.now()
     }));
     const updated = [...formatted, ...items];
-    updateItems(updated);
+    saveItems(updated);
   };
 
   const toggleStatus = (id: string) => {
@@ -88,39 +113,39 @@ const App: React.FC = () => {
       }
       return item;
     });
-    updateItems(updated);
+    saveItems(updated);
   };
 
   const deleteItem = (id: string) => {
     const updated = items.filter(item => item.id !== id);
-    updateItems(updated);
+    saveItems(updated);
   };
 
   const updateItemStore = (id: string, newStore: string) => {
     const updated = items.map(item => 
       item.id === id ? { ...item, store: newStore } : item
     );
-    updateItems(updated);
+    saveItems(updated);
   };
 
   const moveToDraft = (id: string) => {
     const updated: ShoppingItem[] = items.map(item => 
       item.id === id ? { ...item, status: 'DRAFT' as Status } : item
     );
-    updateItems(updated);
+    saveItems(updated);
   };
 
   const moveToActive = (id: string) => {
     const updated: ShoppingItem[] = items.map(item => 
       item.id === id ? { ...item, status: 'ACTIVE' as Status } : item
     );
-    updateItems(updated);
+    saveItems(updated);
   };
 
   const clearCompletedItems = () => {
     if (window.navigator.vibrate) window.navigator.vibrate([30, 50, 30]);
     const updated = items.filter(item => item.status !== 'COMPLETED');
-    updateItems(updated);
+    saveItems(updated);
     setIsShoppingMode(false);
   };
 
@@ -158,7 +183,7 @@ const App: React.FC = () => {
           <Header 
             familyCode={familyCode} 
             isSyncing={isSyncing}
-            onRefresh={fetchItems}
+            onRefresh={() => fetchItems(true)}
             onExit={() => {
               localStorage.removeItem('familyCode');
               setFamilyCode(null);
